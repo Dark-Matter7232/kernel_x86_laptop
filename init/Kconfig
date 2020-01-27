@@ -123,6 +123,24 @@ config THREAD_INFO_IN_TASK
 
 menu "General setup"
 
+config ZENIFY
+	bool "A selection of patches from Zen/Liquorix kernel and additional tweaks for a better gaming experience"
+	default y
+	help
+	  Tunes the kernel for responsiveness at the cost of throughput and power usage.
+
+	  --- Virtual Memory Subsystem ---------------------------
+
+	    Background-reclaim hugepages...:   no   ->   yes
+
+	  --- CFS CPU Scheduler ----------------------------------
+
+	    Scheduling latency.............:   6    ->   4    ms
+	    Minimal granularity............:   0.75 ->   0.4  ms
+	    Wakeup granularity.............:   1    ->   0.5  ms
+	    Bandwidth slice size...........:   5    ->   3    ms
+	    Task rebalancing threshold.....:  32    ->  64
+
 config BROKEN
 	bool
 
