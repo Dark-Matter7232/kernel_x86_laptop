@@ -117,7 +117,11 @@ DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
  * Number of tasks to iterate in a single balance run.
  * Limited because this is done with IRQs disabled.
  */
+#ifdef CONFIG_ZENIFY
+const_debug unsigned int sysctl_sched_nr_migrate = 64;
+#else
 const_debug unsigned int sysctl_sched_nr_migrate = SCHED_NR_MIGRATE_BREAK;
+#endif
 
 __read_mostly int scheduler_running;
 
