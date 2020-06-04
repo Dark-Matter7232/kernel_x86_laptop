@@ -982,6 +982,7 @@ static int acpi_battery_update(struct acpi_battery *battery, bool resume)
 		acpi_battery_init_alarm(battery);
 	}
 
+	battery->update_time = 0;
 	result = acpi_battery_get_state(battery);
 	if (result)
 		return result;
