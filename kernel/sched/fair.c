@@ -9514,8 +9514,10 @@ static int idle_cpu_without(int cpu, struct task_struct *p)
 	 */
 
 #ifdef CONFIG_SMP
+#if SCHED_FEAT_TTWU_QUEUE
 	if (rq->ttwu_pending)
 		return 0;
+#endif
 #endif
 
 	return 1;
@@ -11540,12 +11542,14 @@ static int newidle_balance(struct rq *this_rq, struct rq_flags *rf)
 
 	update_misfit_status(NULL, this_rq);
 
+#if SCHED_FEAT_TTWU_QUEUE
 	/*
 	 * There is a task waiting to run. No need to search for one.
 	 * Return 0; the task will be enqueued when switching to idle.
 	 */
 	if (this_rq->ttwu_pending)
 		return 0;
+#endif
 
 	/*
 	 * We must set idle_stamp _before_ calling idle_balance(), such that we
@@ -11614,8 +11618,12 @@ static int newidle_balance(struct rq *this_rq, struct rq_flags *rf)
 		 * Stop searching for tasks to pull if there are
 		 * now runnable tasks on this rq.
 		 */
+#if SCHED_FEAT_TTWU_QUEUE
 		if (pulled_task || this_rq->nr_running > 0 ||
 		    this_rq->ttwu_pending)
+#else
+		if (pulled_task || this_rq->nr_running > 0)
+#endif
 			break;
 	}
 	rcu_read_unlock();
