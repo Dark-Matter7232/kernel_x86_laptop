@@ -277,8 +277,11 @@ static int smu_dpm_set_power_gate(void *handle,
 	struct smu_context *smu = handle;
 	int ret = 0;
 
-	if (!smu->pm_enabled || !smu->adev->pm.dpm_enabled)
+	if (!smu->pm_enabled || !smu->adev->pm.dpm_enabled) {
+		WARN(true, "SMU uninitialized but power %s requested for %u!\n",
+		     gate ? "gate" : "ungate", block_type);
 		return -EOPNOTSUPP;
+	}
 
 	switch (block_type) {
 	/*
