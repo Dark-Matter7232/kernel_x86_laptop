@@ -16,6 +16,7 @@
 
 #include <linux/atomic.h>
 #include <linux/types.h>
+#include <linux/mutex.h>
 
 struct vc_data;
 struct console_font_op;
@@ -133,9 +134,11 @@ static inline int con_debug_leave(void)
 #define CON_CONSDEV	(2) /* Preferred console, /dev/console */
 #define CON_ENABLED	(4)
 #define CON_BOOT	(8)
-#define CON_ANYTIME	(16) /* Safe to call when cpu is offline */
+#define CON_ANYTIME	(16) /* Safe to call before per-cpu resources ready */
 #define CON_BRL		(32) /* Used for a braille device */
 #define CON_EXTENDED	(64) /* Use the extended output format a la /dev/kmsg */
+#define CON_PAUSED	(128) /* Sleep while console is locked */
+#define CON_MIGHT_SLEEP	(256) /* Can only be called from sleepable context */
 
 struct console {
 	char	name[16];
@@ -151,6 +154,23 @@ struct console {
 	int	cflag;
 	uint	ispeed;
 	uint	ospeed;
+	u64	seq;
+	unsigned long dropped;
+	struct task_struct *thread;
+
+	/*
+	 * The per-console lock is used by printing kthreads to synchronize
+	 * this console with callers of console_lock(). This is necessary in
+	 * order to allow printing kthreads to run in parallel to each other,
+	 * while each safely accessing their own @flags and synchronizing
+	 * against direct printing via console_lock/console_unlock.
+	 *
+	 * Note: For synchronizing against direct printing via
+	 *       console_trylock/console_unlock, see the static global
+	 *       variable @console_lock_count.
+	 */
+	struct mutex lock;
+
 	void	*data;
 	struct	 console *next;
 };
