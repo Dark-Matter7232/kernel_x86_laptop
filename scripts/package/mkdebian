@@ -91,7 +91,7 @@ if [ -n "$KDEB_PKGVERSION" ]; then
 	revision=${packageversion##*-}
 else
 	revision=$(cat .version 2>/dev/null||echo 1)
-	packageversion=$version-$revision
+	packageversion=$revision
 fi
 sourcename=$KDEB_SOURCENAME
 
