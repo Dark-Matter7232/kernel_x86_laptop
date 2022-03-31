@@ -1,0 +1,78 @@
+env:
+  CIRRUS_CLONE_DEPTH: "1"
+  GH_AUTH: "ENCRYPTED[!37f49a3c2ff53ae3cd6478518356b31d939652e0113563bc5eb7810872807212776b2a02c17c21f6228eb967162fb357!]"
+  RCLONE_CONF: "ENCRYPTED[!f561cdd03c82c5d1e30aece7427aa751dc66fce3a2ad27089e2b10a7809e44c8c17149deea8858679b109aa4a2a8a95b!]"
+
+generic_task:
+  name: Generic build
+  timeout_in: 120m
+  container:
+    image: archlinux:base-devel
+    cpu: 8
+    memory: 4G
+  setup_env_script:
+    - pacman -Syu --needed --noconfirm bc libelf pahole cpio perl tar xz
+      git ccache zstd rclone github-cli
+    - mkdir -p ~/.config/rclone
+    - echo "$RCLONE_CONF" > ~/.config/rclone/rclone.conf
+    - gh auth login --with-token <<< "$GH_AUTH"
+    - rclone copy gdrive:ccache-generic.tar /tmp
+    - tar xf /tmp/ccache-generic.tar -C /tmp
+    - rm /tmp/ccache-generic.tar
+    - ccache --set-config=cache_dir=/tmp/ccache
+    - ccache --set-config=compression=true
+    - ccache --set-config=max_size=5000M
+    - ccache --set-config=sloppiness=locale,time_macros
+    - ccache --zero-stats
+    - sed -i '/E_ROOT/d' /usr/bin/makepkg
+    - sed -i "s/PKGEXT='.pkg.tar.xz'/PKGEXT='.pkg.tar.zst'/" /etc/makepkg.conf
+    - echo 'COMPRESSZST+=(--threads=0)' >> /etc/makepkg.conf
+  build_script:
+    - env ci=y ccache=y makepkg -s --nodeps
+  store_cache_script:
+    - ccache --cleanup
+    - ccache --show-stats
+    - tar -C /tmp -cf /tmp/ccache-generic.tar ccache
+    - ? rclone copy /tmp/ccache-generic.tar gdrive
+  release_script:
+    - VER=$(grep "VERSION =" Makefile | head -1 | sed "s/.*= //" )
+    - PATCH=$(grep "PATCHLEVEL =" Makefile | head -1 | sed "s/.*= //")
+    - SUB=$(grep "SUBLEVEL =" Makefile | head -1 | sed "s/.*= //")
+    - TAG="${VER}.${PATCH}.${SUB}"
+    - TARGET="${VER}.${PATCH}"
+    - gh release create "${TAG}" *.pkg.tar.zst -d -t "${TAG}" -F notes.md --target "${TARGET}" 
+  artifacts:
+    path: "*.pkg.tar.zst"
+
+athena_task:
+  name: Athena build
+  timeout_in: 120m
+  container:
+    image: archlinux:base-devel
+    cpu: 8
+    memory: 4G
+  setup_env_script:
+    - pacman -Syu --needed --noconfirm bc libelf pahole cpio perl tar xz
+      git ccache zstd rclone
+    - mkdir -p ~/.config/rclone
+    - echo "$RCLONE_CONF" > ~/.config/rclone/rclone.conf
+    - rclone copy gdrive:ccache-athena.tar /tmp
+    - tar xf /tmp/ccache-athena.tar -C /tmp
+    - rm /tmp/ccache-athena.tar
+    - ccache --set-config=cache_dir=/tmp/ccache
+    - ccache --set-config=compression=true
+    - ccache --set-config=max_size=5000M
+    - ccache --set-config=sloppiness=locale,time_macros
+    - ccache --zero-stats
+    - sed -i '/E_ROOT/d' /usr/bin/makepkg
+    - sed -i "s/PKGEXT='.pkg.tar.xz'/PKGEXT='.pkg.tar.zst'/" /etc/makepkg.conf
+    - echo 'COMPRESSZST+=(--threads=0)' >> /etc/makepkg.conf
+  build_script:
+    - env ci=y ccache=y personal=y makepkg -s --nodeps
+  store_cache_script:
+    - ccache --cleanup
+    - ccache --show-stats
+    - tar -C /tmp -cf /tmp/ccache-athena.tar ccache
+    - ? rclone copy /tmp/ccache-athena.tar gdrive
+  artifacts:
+    path: "*.pkg.tar.zst"
