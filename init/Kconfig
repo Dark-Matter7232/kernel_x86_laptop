@@ -129,6 +129,10 @@ config ZENIFY
 	help
 	  Tunes the kernel for responsiveness at the cost of throughput and power usage.
 
+	  --- Block Layer ----------------------------------------
+
+	    DM-Crypt Workqueues.......:          on -> off
+
 	  --- Virtual Memory Subsystem ---------------------------
 
 	    Background-reclaim hugepages...:   no   ->   yes
