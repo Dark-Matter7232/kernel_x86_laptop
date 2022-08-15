@@ -556,16 +556,6 @@ static void lid_flip_tablet_mode_get_state(struct asus_wmi *asus)
 }
 
 /* dGPU ********************************************************************/
-static int dgpu_disable_check_present(struct asus_wmi *asus)
-{
-	asus->dgpu_disable_available = false;
-
-	if (asus_wmi_dev_is_present(asus, ASUS_WMI_DEVID_DGPU))
-		asus->dgpu_disable_available = true;
-
-	return 0;
-}
-
 static ssize_t dgpu_disable_show(struct device *dev,
 				   struct device_attribute *attr, char *buf)
 {
@@ -619,16 +609,6 @@ static ssize_t dgpu_disable_store(struct device *dev,
 static DEVICE_ATTR_RW(dgpu_disable);
 
 /* eGPU ********************************************************************/
-static int egpu_enable_check_present(struct asus_wmi *asus)
-{
-	asus->egpu_enable_available = false;
-
-	if (asus_wmi_dev_is_present(asus, ASUS_WMI_DEVID_EGPU))
-		asus->egpu_enable_available = true;
-
-	return 0;
-}
-
 static ssize_t egpu_enable_show(struct device *dev,
 				   struct device_attribute *attr, char *buf)
 {
@@ -1472,16 +1452,6 @@ exit:
 }
 
 /* Panel Overdrive ************************************************************/
-static int panel_od_check_present(struct asus_wmi *asus)
-{
-	asus->panel_overdrive_available = false;
-
-	if (asus_wmi_dev_is_present(asus, ASUS_WMI_DEVID_PANEL_OD))
-		asus->panel_overdrive_available = true;
-
-	return 0;
-}
-
 static ssize_t panel_od_show(struct device *dev,
 				   struct device_attribute *attr, char *buf)
 {
@@ -3467,13 +3437,9 @@ static int asus_wmi_add(struct platform_device *pdev)
 	if (err)
 		goto fail_platform;
 
-	err = egpu_enable_check_present(asus);
-	if (err)
-		goto fail_egpu_enable;
-
-	err = dgpu_disable_check_present(asus);
-	if (err)
-		goto fail_dgpu_disable;
+	asus->egpu_enable_available = asus_wmi_dev_is_present(asus, ASUS_WMI_DEVID_EGPU);
+	asus->dgpu_disable_available = asus_wmi_dev_is_present(asus, ASUS_WMI_DEVID_DGPU);
+	asus->panel_overdrive_available = asus_wmi_dev_is_present(asus, ASUS_WMI_DEVID_PANEL_OD);
 
 	err = fan_boost_mode_check_present(asus);
 	if (err)
@@ -3488,10 +3454,6 @@ static int asus_wmi_add(struct platform_device *pdev)
 	err = platform_profile_setup(asus);
 	if (err)
 		goto fail_platform_profile_setup;
-
-	err = panel_od_check_present(asus);
-	if (err)
-		goto fail_panel_od;
 
 	err = asus_wmi_sysfs_init(asus->platform_device);
 	if (err)
@@ -3587,10 +3549,7 @@ fail_platform_profile_setup:
 	if (asus->platform_profile_support)
 		platform_profile_remove();
 fail_fan_boost_mode:
-fail_egpu_enable:
-fail_dgpu_disable:
 fail_platform:
-fail_panel_od:
 	kfree(asus);
 	return err;
 }
