@@ -501,7 +501,7 @@ struct inode *ntfs_iget5(struct super_block *sb, const struct MFT_REF *ref,
 		inode = ntfs_read_mft(inode, name, ref);
 	else if (ref->seq != ntfs_i(inode)->mi.mrec->seq) {
 		/* Inode overlaps? */
-		make_bad_inode(inode);
+		_ntfs_bad_inode(inode);
 	}
 
 	return inode;
@@ -1635,7 +1635,7 @@ out4:
 	ni->mi.dirty = false;
 	discard_new_inode(inode);
 out3:
-	ntfs_mark_rec_free(sbi, ino);
+	ntfs_mark_rec_free(sbi, ino, false);
 
 out2:
 	__putname(new_de);
@@ -1658,7 +1658,6 @@ int ntfs_link_inode(struct inode *inode, struct dentry *dentry)
 	struct ntfs_inode *ni = ntfs_i(inode);
 	struct ntfs_sb_info *sbi = inode->i_sb->s_fs_info;
 	struct NTFS_DE *de;
-	struct ATTR_FILE_NAME *de_name;
 
 	/* Allocate PATH_MAX bytes. */
 	de = __getname();
@@ -1672,15 +1671,6 @@ int ntfs_link_inode(struct inode *inode, struct dentry *dentry)
 	err = fill_name_de(sbi, de, &dentry->d_name, NULL);
 	if (err)
 		goto out;
-
-	de_name = (struct ATTR_FILE_NAME *)(de + 1);
-	/* Fill duplicate info. */
-	de_name->dup.cr_time = de_name->dup.m_time = de_name->dup.c_time =
-		de_name->dup.a_time = kernel2nt(&inode->i_ctime);
-	de_name->dup.alloc_size = de_name->dup.data_size =
-		cpu_to_le64(inode->i_size);
-	de_name->dup.fa = ni->std_fa;
-	de_name->dup.ea_size = de_name->dup.reparse = 0;
 
 	err = ni_add_name(ntfs_i(d_inode(dentry->d_parent)), ni, de);
 out:
@@ -1734,9 +1724,7 @@ int ntfs_unlink_inode(struct inode *dir, const struct dentry *dentry)
 		if (inode->i_nlink)
 			mark_inode_dirty(inode);
 	} else if (!ni_remove_name_undo(dir_ni, ni, de, de2, undo_remove)) {
-		make_bad_inode(inode);
-		ntfs_inode_err(inode, "failed to undo unlink");
-		ntfs_set_state(sbi, NTFS_DIRTY_ERROR);
+		_ntfs_bad_inode(inode);
 	} else {
 		if (ni_is_dirty(dir))
 			mark_inode_dirty(dir);
