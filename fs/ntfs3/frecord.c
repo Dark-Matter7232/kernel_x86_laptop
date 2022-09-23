@@ -3279,6 +3279,7 @@ int ni_write_inode(struct inode *inode, int sync, const char *hint)
 			modified = true;
 		}
 
+		/* std attribute is always in primary MFT record. */
 		if (modified)
 			ni->mi.dirty = true;
 
