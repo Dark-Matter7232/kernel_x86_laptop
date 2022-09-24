@@ -782,11 +782,9 @@ static int ntfs_getxattr(const struct xattr_handler *handler, struct dentry *de,
 {
 	int err;
 	struct ntfs_inode *ni = ntfs_i(inode);
-	size_t name_len = strlen(name);
 
 	/* Dispatch request. */
-	if (name_len == sizeof(SYSTEM_DOS_ATTRIB) - 1 &&
-	    !memcmp(name, SYSTEM_DOS_ATTRIB, sizeof(SYSTEM_DOS_ATTRIB))) {
+	if (!strcmp(name, SYSTEM_DOS_ATTRIB)) {
 		/* system.dos_attrib */
 		if (!buffer) {
 			err = sizeof(u8);
@@ -799,8 +797,7 @@ static int ntfs_getxattr(const struct xattr_handler *handler, struct dentry *de,
 		goto out;
 	}
 
-	if (name_len == sizeof(SYSTEM_NTFS_ATTRIB) - 1 &&
-	    !memcmp(name, SYSTEM_NTFS_ATTRIB, sizeof(SYSTEM_NTFS_ATTRIB))) {
+	if (!strcmp(name, SYSTEM_NTFS_ATTRIB)) {
 		/* system.ntfs_attrib */
 		if (!buffer) {
 			err = sizeof(u32);
@@ -813,8 +810,7 @@ static int ntfs_getxattr(const struct xattr_handler *handler, struct dentry *de,
 		goto out;
 	}
 
-	if (name_len == sizeof(SYSTEM_NTFS_SECURITY) - 1 &&
-	    !memcmp(name, SYSTEM_NTFS_SECURITY, sizeof(SYSTEM_NTFS_SECURITY))) {
+	if (!strcmp(name, SYSTEM_NTFS_SECURITY)) {
 		/* system.ntfs_security*/
 		struct SECURITY_DESCRIPTOR_RELATIVE *sd = NULL;
 		size_t sd_size = 0;
@@ -854,16 +850,12 @@ static int ntfs_getxattr(const struct xattr_handler *handler, struct dentry *de,
 	}
 
 #ifdef CONFIG_NTFS3_FS_POSIX_ACL
-	if ((name_len == sizeof(XATTR_NAME_POSIX_ACL_ACCESS) - 1 &&
-	     !memcmp(name, XATTR_NAME_POSIX_ACL_ACCESS,
-		     sizeof(XATTR_NAME_POSIX_ACL_ACCESS))) ||
-	    (name_len == sizeof(XATTR_NAME_POSIX_ACL_DEFAULT) - 1 &&
-	     !memcmp(name, XATTR_NAME_POSIX_ACL_DEFAULT,
-		     sizeof(XATTR_NAME_POSIX_ACL_DEFAULT)))) {
+	if (!strcmp(name, XATTR_NAME_POSIX_ACL_ACCESS) ||
+	    !strcmp(name, XATTR_NAME_POSIX_ACL_DEFAULT)) {
 		/* TODO: init_user_ns? */
 		err = ntfs_xattr_get_acl(
 			&init_user_ns, inode,
-			name_len == sizeof(XATTR_NAME_POSIX_ACL_ACCESS) - 1
+			strlen(name) == sizeof(XATTR_NAME_POSIX_ACL_ACCESS) - 1
 				? ACL_TYPE_ACCESS
 				: ACL_TYPE_DEFAULT,
 			buffer, size);
@@ -871,7 +863,7 @@ static int ntfs_getxattr(const struct xattr_handler *handler, struct dentry *de,
 	}
 #endif
 	/* Deal with NTFS extended attribute. */
-	err = ntfs_get_ea(inode, name, name_len, buffer, size, NULL);
+	err = ntfs_get_ea(inode, name, strlen(name), buffer, size, NULL);
 
 out:
 	return err;
@@ -888,20 +880,17 @@ static noinline int ntfs_setxattr(const struct xattr_handler *handler,
 {
 	int err = -EINVAL;
 	struct ntfs_inode *ni = ntfs_i(inode);
-	size_t name_len = strlen(name);
 	enum FILE_ATTRIBUTE new_fa;
 
 	/* Dispatch request. */
-	if (name_len == sizeof(SYSTEM_DOS_ATTRIB) - 1 &&
-	    !memcmp(name, SYSTEM_DOS_ATTRIB, sizeof(SYSTEM_DOS_ATTRIB))) {
+	if (!strcmp(name, SYSTEM_DOS_ATTRIB)) {
 		if (sizeof(u8) != size)
 			goto out;
 		new_fa = cpu_to_le32(*(u8 *)value);
 		goto set_new_fa;
 	}
 
-	if (name_len == sizeof(SYSTEM_NTFS_ATTRIB) - 1 &&
-	    !memcmp(name, SYSTEM_NTFS_ATTRIB, sizeof(SYSTEM_NTFS_ATTRIB))) {
+	if (!strcmp(name, SYSTEM_NTFS_ATTRIB)) {
 		if (size != sizeof(u32))
 			goto out;
 		new_fa = cpu_to_le32(*(u32 *)value);
@@ -939,8 +928,7 @@ set_new_fa:
 		goto out;
 	}
 
-	if (name_len == sizeof(SYSTEM_NTFS_SECURITY) - 1 &&
-	    !memcmp(name, SYSTEM_NTFS_SECURITY, sizeof(SYSTEM_NTFS_SECURITY))) {
+	if (!strcmp(name, SYSTEM_NTFS_SECURITY)) {
 		/* system.ntfs_security*/
 		__le32 security_id;
 		bool inserted;
@@ -983,15 +971,11 @@ set_new_fa:
 	}
 
 #ifdef CONFIG_NTFS3_FS_POSIX_ACL
-	if ((name_len == sizeof(XATTR_NAME_POSIX_ACL_ACCESS) - 1 &&
-	     !memcmp(name, XATTR_NAME_POSIX_ACL_ACCESS,
-		     sizeof(XATTR_NAME_POSIX_ACL_ACCESS))) ||
-	    (name_len == sizeof(XATTR_NAME_POSIX_ACL_DEFAULT) - 1 &&
-	     !memcmp(name, XATTR_NAME_POSIX_ACL_DEFAULT,
-		     sizeof(XATTR_NAME_POSIX_ACL_DEFAULT)))) {
+	if (!strcmp(name, XATTR_NAME_POSIX_ACL_ACCESS) ||
+	    !strcmp(name, XATTR_NAME_POSIX_ACL_DEFAULT)) {
 		err = ntfs_xattr_set_acl(
 			mnt_userns, inode,
-			name_len == sizeof(XATTR_NAME_POSIX_ACL_ACCESS) - 1
+			strlen(name) == sizeof(XATTR_NAME_POSIX_ACL_ACCESS) - 1
 				? ACL_TYPE_ACCESS
 				: ACL_TYPE_DEFAULT,
 			value, size);
@@ -999,7 +983,7 @@ set_new_fa:
 	}
 #endif
 	/* Deal with NTFS extended attribute. */
-	err = ntfs_set_ea(inode, name, name_len, value, size, flags, 0);
+	err = ntfs_set_ea(inode, name, strlen(name), value, size, flags, 0);
 
 out:
 	inode->i_ctime = current_time(inode);
