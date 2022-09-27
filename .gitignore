@@ -37,6 +37,7 @@
 *.o
 *.o.*
 *.patch
+*.relocs
 *.rmeta
 *.rsi
 *.s
