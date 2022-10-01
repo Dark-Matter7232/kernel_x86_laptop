@@ -235,6 +235,7 @@ struct rcu_data {
 					 * if rdp_gp.
 					 */
 	struct list_head nocb_entry_rdp; /* rcu_data node in wakeup chain. */
+	struct rcu_data *nocb_toggling_rdp; /* rdp queued for (de-)offloading */
 
 	/* The following fields are used by CB kthread, hence new cacheline. */
 	struct rcu_data *nocb_gp_rdp ____cacheline_internodealigned_in_smp;
@@ -425,7 +426,7 @@ static void rcu_flavor_sched_clock_irq(int user);
 static void dump_blkd_tasks(struct rcu_node *rnp, int ncheck);
 static void rcu_initiate_boost(struct rcu_node *rnp, unsigned long flags);
 static void rcu_preempt_boost_start_gp(struct rcu_node *rnp);
-static bool rcu_is_callbacks_kthread(void);
+static bool rcu_is_callbacks_kthread(struct rcu_data *rdp);
 static void rcu_cpu_kthread_setup(unsigned int cpu);
 static void rcu_spawn_one_boost_kthread(struct rcu_node *rnp);
 static bool rcu_preempt_has_tasks(struct rcu_node *rnp);
