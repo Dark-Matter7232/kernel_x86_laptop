@@ -5061,7 +5061,8 @@ done:
 		req_set_fail(req);
 	__io_req_complete(req, issue_flags, ret, 0);
 	/* put file to avoid an attempt to IOPOLL the req */
-	io_put_file(req->file);
+	if (!(req->flags & REQ_F_FIXED_FILE))
+		io_put_file(req->file);
 	req->file = NULL;
 	return 0;
 }
@@ -10950,6 +10951,9 @@ static __cold void io_ring_ctx_wait_and_kill(struct io_ring_ctx *ctx)
 		io_poll_remove_all(ctx, NULL, true);
 		/* if we failed setting up the ctx, we might not have any rings */
 		io_iopoll_try_reap_events(ctx);
+		/* drop cached put refs after potentially doing completions */
+		if (current->io_uring)
+			io_uring_drop_tctx_refs(current);
 	}
 
 	INIT_WORK(&ctx->exit_work, io_ring_exit_work);
