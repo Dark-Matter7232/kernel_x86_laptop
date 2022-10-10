@@ -242,6 +242,8 @@ static void get_recent_times(struct psi_group *group, int cpu,
 			     u32 *pchanged_states)
 {
 	struct psi_group_cpu *groupc = per_cpu_ptr(group->pcpu, cpu);
+	int current_cpu = raw_smp_processor_id();
+	bool only_avgs_work = false;
 	u64 now, state_start;
 	enum psi_states s;
 	unsigned int seq;
@@ -256,6 +258,15 @@ static void get_recent_times(struct psi_group *group, int cpu,
 		memcpy(times, groupc->times, sizeof(groupc->times));
 		state_mask = groupc->state_mask;
 		state_start = groupc->state_start;
+		/*
+		 * This CPU has only avgs_work kworker running, snapshot the
+		 * newest times then don't need to re-arm for this groupc.
+		 * Normally this kworker will sleep soon and won't wake
+		 * avgs_work back up in psi_group_change().
+		 */
+		if (current_cpu == cpu && groupc->tasks[NR_RUNNING] == 1 &&
+		    !groupc->tasks[NR_IOWAIT] && !groupc->tasks[NR_MEMSTALL])
+			only_avgs_work = true;
 	} while (read_seqcount_retry(&groupc->seq, seq));
 
 	/* Calculate state time deltas against the previous snapshot */
@@ -280,6 +291,10 @@ static void get_recent_times(struct psi_group *group, int cpu,
 		if (delta)
 			*pchanged_states |= (1 << s);
 	}
+
+	/* Clear PSI_NONIDLE so avgs_work won't be re-armed for this groupc */
+	if (only_avgs_work)
+		*pchanged_states &= ~(1 << PSI_NONIDLE);
 }
 
 static void calc_avgs(unsigned long avg[3], int missed_periods,
