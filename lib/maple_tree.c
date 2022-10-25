@@ -6002,7 +6002,7 @@ void *mas_find(struct ma_state *mas, unsigned long max)
 	if (unlikely(!mas_searchable(mas)))
 		return NULL;
 
-	/* Retries on dead nodes handled by mas_next_entry */
+	/* Retries on dead nodes handled by mas_prev_entry */
 	return mas_next_entry(mas, max);
 }
 
