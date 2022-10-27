@@ -90,6 +90,18 @@ void memcg_reparent_list_lrus(struct mem_cgroup *memcg, struct mem_cgroup *paren
 bool list_lru_add(struct list_lru *lru, struct list_head *item);
 
 /**
+ * list_lru_add_page: add an element to the lru list's tail
+ * @list_lru: the lru pointer
+ * @page: the page containing the item
+ * @item: the item to be deleted.
+ *
+ * This function works the same as list_lru_add in terms of list
+ * manipulation. Used for non slab objects contained in the page.
+ *
+ * Return value: true if the list was updated, false otherwise
+ */
+bool list_lru_add_page(struct list_lru *lru, struct page *page, struct list_head *item);
+/**
  * list_lru_del: delete an element to the lru list
  * @list_lru: the lru pointer
  * @item: the item to be deleted.
@@ -102,6 +114,18 @@ bool list_lru_add(struct list_lru *lru, struct list_head *item);
  */
 bool list_lru_del(struct list_lru *lru, struct list_head *item);
 
+/**
+ * list_lru_del_page: delete an element to the lru list
+ * @list_lru: the lru pointer
+ * @page: the page containing the item
+ * @item: the item to be deleted.
+ *
+ * This function works the same as list_lru_del in terms of list
+ * manipulation. Used for non slab objects contained in the page.
+ *
+ * Return value: true if the list was updated, false otherwise
+ */
+bool list_lru_del_page(struct list_lru *lru, struct page *page, struct list_head *item);
 /**
  * list_lru_count_one: return the number of objects currently held by @lru
  * @lru: the lru pointer.
