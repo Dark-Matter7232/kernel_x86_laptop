@@ -178,6 +178,8 @@ bool hugepage_vma_check(struct vm_area_struct *vma, unsigned long vm_flags,
 unsigned long thp_get_unmapped_area(struct file *filp, unsigned long addr,
 		unsigned long len, unsigned long pgoff, unsigned long flags);
 
+bool can_shrink_thp(struct folio *folio);
+
 void prep_transhuge_page(struct page *page);
 void free_transhuge_page(struct page *page);
 
@@ -188,6 +190,8 @@ static inline int split_huge_page(struct page *page)
 	return split_huge_page_to_list(page, NULL);
 }
 void deferred_split_huge_page(struct page *page);
+
+void add_underutilized_thp(struct page *page);
 
 void __split_huge_pmd(struct vm_area_struct *vma, pmd_t *pmd,
 		unsigned long address, bool freeze, struct folio *folio);
@@ -300,6 +304,11 @@ static inline struct list_head *page_deferred_list(struct page *page)
 	 * "struct page" definition.
 	 */
 	return &page[2].deferred_list;
+}
+
+static inline struct list_head *page_underutilized_thp_list(struct page *page)
+{
+	return &page[3].underutilized_thp_list;
 }
 
 #else /* CONFIG_TRANSPARENT_HUGEPAGE */
