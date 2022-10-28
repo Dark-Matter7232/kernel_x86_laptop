@@ -183,6 +183,10 @@ static void ma_free_rcu(struct maple_node *node)
 	call_rcu(&node->rcu, mt_free_rcu);
 }
 
+static unsigned int mt_height(const struct maple_tree *mt)
+{
+	return (mt->ma_flags & MT_FLAGS_HEIGHT_MASK) >> MT_FLAGS_HEIGHT_OFFSET;
+}
 
 static void mas_set_height(struct ma_state *mas)
 {
@@ -6538,26 +6542,8 @@ static inline int mas_dead_node(struct ma_state *mas, unsigned long index)
 	mas_rewalk(mas, index);
 	return 1;
 }
-
-void mt_cache_shrink(void)
-{
-}
-#else
-/*
- * mt_cache_shrink() - For testing, don't use this.
- *
- * Certain testcases can trigger an OOM when combined with other memory
- * debugging configuration options.  This function is used to reduce the
- * possibility of an out of memory even due to kmem_cache objects remaining
- * around for longer than usual.
- */
-void mt_cache_shrink(void)
-{
-	kmem_cache_shrink(maple_node_cache);
-
-}
-
 #endif /* not defined __KERNEL__ */
+
 /*
  * mas_get_slot() - Get the entry in the maple state node stored at @offset.
  * @mas: The maple state
