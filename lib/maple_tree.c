@@ -6065,6 +6065,7 @@ void *mas_find_rev(struct ma_state *mas, unsigned long min)
 	return mas_prev_entry(mas, min);
 }
 EXPORT_SYMBOL_GPL(mas_find_rev);
+EXPORT_SYMBOL_GPL(mas_find);
 
 /**
  * mas_erase() - Find the range in which index resides and erase the entire
