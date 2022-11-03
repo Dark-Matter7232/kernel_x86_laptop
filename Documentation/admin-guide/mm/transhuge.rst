@@ -304,6 +304,15 @@ To identify what applications are mapping file transparent huge pages, it
 is necessary to read ``/proc/PID/smaps`` and count the FileHugeMapped fields
 for each mapping.
 
+The utilization of transparent hugepages can be viewed by reading
+``/sys/kernel/debug/thp_utilization``. The utilization of a THP is defined
+as the ratio of non zero filled 4kb pages to the total number of pages in a
+THP. The buckets are labelled by the range of total utilized 4kb pages with
+one line per utilization bucket. Each line contains the total number of
+THPs in that bucket and the total number of zero filled 4kb pages summed
+over all THPs in that bucket. The last two lines show the timestamp and
+duration respectively of the most recent scan over all of physical memory.
+
 Note that reading the smaps file is expensive and reading it
 frequently will incur overhead.
 
