@@ -75,6 +75,8 @@ static atomic_t huge_zero_refcount;
 struct page *huge_zero_page __read_mostly;
 unsigned long huge_zero_pfn __read_mostly = ~0UL;
 
+static struct list_lru huge_low_util_page_lru;
+
 bool hugepage_vma_check(struct vm_area_struct *vma, unsigned long vm_flags,
 			bool smaps, bool in_pf, bool enforce_sysfs)
 {
@@ -236,6 +238,53 @@ static struct shrinker huge_zero_page_shrinker = {
 	.count_objects = shrink_huge_zero_page_count,
 	.scan_objects = shrink_huge_zero_page_scan,
 	.seeks = DEFAULT_SEEKS,
+};
+
+static enum lru_status low_util_free_page(struct list_head *item,
+					  struct list_lru_one *lru,
+					  spinlock_t *lru_lock,
+					  void *cb_arg)
+{
+	struct folio *folio = page_folio(list_entry(item, struct page, underutilized_thp_list));
+	struct page *head = &folio->page;
+
+	if (get_page_unless_zero(head)) {
+		/* Inverse lock order from add_underutilized_thp() */
+		if (!trylock_page(head)) {
+			put_page(head);
+			return LRU_SKIP;
+		}
+		list_lru_isolate(lru, item);
+		spin_unlock_irq(lru_lock);
+		if (can_shrink_thp(folio))
+			split_huge_page(head);
+		spin_lock_irq(lru_lock);
+		unlock_page(head);
+		put_page(head);
+	}
+
+	return LRU_REMOVED_RETRY;
+}
+
+static unsigned long shrink_huge_low_util_page_count(struct shrinker *shrink,
+						     struct shrink_control *sc)
+{
+	return HPAGE_PMD_NR * list_lru_shrink_count(&huge_low_util_page_lru, sc);
+}
+
+static unsigned long shrink_huge_low_util_page_scan(struct shrinker *shrink,
+						    struct shrink_control *sc)
+{
+	return HPAGE_PMD_NR * list_lru_shrink_walk_irq(&huge_low_util_page_lru,
+							sc, low_util_free_page, NULL);
+}
+
+static struct shrinker huge_low_util_page_shrinker = {
+	.count_objects = shrink_huge_low_util_page_count,
+	.scan_objects = shrink_huge_low_util_page_scan,
+	.seeks = DEFAULT_SEEKS,
+	.flags = SHRINKER_NUMA_AWARE | SHRINKER_MEMCG_AWARE |
+		SHRINKER_NONSLAB,
 };
 
 #ifdef CONFIG_SYSFS
@@ -489,6 +538,9 @@ static int __init hugepage_init(void)
 	if (err)
 		goto err_slab;
 
+	err = register_shrinker(&huge_low_util_page_shrinker, "thp-low-util");
+	if (err)
+		goto err_low_util_shrinker;
 	err = register_shrinker(&huge_zero_page_shrinker, "thp-zero");
 	if (err)
 		goto err_hzp_shrinker;
@@ -496,6 +548,9 @@ static int __init hugepage_init(void)
 	if (err)
 		goto err_split_shrinker;
 
+	err = list_lru_init_memcg(&huge_low_util_page_lru, &huge_low_util_page_shrinker);
+	if (err)
+		goto err_low_util_list_lru;
 	/*
 	 * By default disable transparent hugepages on smaller systems,
 	 * where the extra memory used could hurt more than TLB overhead
@@ -512,10 +567,14 @@ static int __init hugepage_init(void)
 
 	return 0;
 err_khugepaged:
+	list_lru_destroy(&huge_low_util_page_lru);
+err_low_util_list_lru:
 	unregister_shrinker(&deferred_split_shrinker);
 err_split_shrinker:
 	unregister_shrinker(&huge_zero_page_shrinker);
 err_hzp_shrinker:
+	unregister_shrinker(&huge_low_util_page_shrinker);
+err_low_util_shrinker:
 	khugepaged_destroy();
 err_slab:
 	hugepage_exit_sysfs(hugepage_kobj);
@@ -590,6 +649,7 @@ void prep_transhuge_page(struct page *page)
 	 */
 
 	INIT_LIST_HEAD(page_deferred_list(page));
+	INIT_LIST_HEAD(page_underutilized_thp_list(page));
 	set_compound_page_dtor(page, TRANSHUGE_PAGE_DTOR);
 }
 
@@ -2380,7 +2440,7 @@ static void unmap_folio(struct folio *folio)
 		try_to_unmap(folio, ttu_flags | TTU_IGNORE_MLOCK);
 }
 
-static void remap_page(struct folio *folio, unsigned long nr)
+static void remap_page(struct folio *folio, unsigned long nr, bool unmap_clean)
 {
 	int i = 0;
 
@@ -2388,7 +2448,7 @@ static void remap_page(struct folio *folio, unsigned long nr)
 	if (!folio_test_anon(folio))
 		return;
 	for (;;) {
-		remove_migration_ptes(folio, folio, true);
+		remove_migration_ptes(folio, folio, true, unmap_clean);
 		i += folio_nr_pages(folio);
 		if (i >= nr)
 			break;
@@ -2458,8 +2518,7 @@ static void __split_huge_page_tail(struct page *head, int tail,
 			 LRU_GEN_MASK | LRU_REFS_MASK));
 
 	/* ->mapping in first tail page is compound_mapcount */
-	VM_BUG_ON_PAGE(tail > 2 && page_tail->mapping != TAIL_MAPPING,
-			page_tail);
+	VM_BUG_ON_PAGE(tail > 3 && page_tail->mapping != TAIL_MAPPING, page_tail);
 	page_tail->mapping = head->mapping;
 	page_tail->index = head->index + tail;
 
@@ -2512,6 +2571,8 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 	struct address_space *swap_cache = NULL;
 	unsigned long offset = 0;
 	unsigned int nr = thp_nr_pages(head);
+	LIST_HEAD(pages_to_free);
+	int nr_pages_to_free = 0;
 	int i;
 
 	/* complete memcg works before add pages to LRU */
@@ -2574,7 +2635,7 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 	}
 	local_irq_enable();
 
-	remap_page(folio, nr);
+	remap_page(folio, nr, PageAnon(head));
 
 	if (PageSwapCache(head)) {
 		swp_entry_t entry = { .val = page_private(head) };
@@ -2589,6 +2650,34 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 		unlock_page(subpage);
 
 		/*
+		 * If a tail page has only two references left, one inherited
+		 * from the isolation of its head and the other from
+		 * lru_add_page_tail() which we are about to drop, it means this
+		 * tail page was concurrently zapped. Then we can safely free it
+		 * and save page reclaim or migration the trouble of trying it.
+		 */
+		if (list && page_ref_freeze(subpage, 2)) {
+			VM_BUG_ON_PAGE(PageLRU(subpage), subpage);
+			VM_BUG_ON_PAGE(PageCompound(subpage), subpage);
+			VM_BUG_ON_PAGE(page_mapped(subpage), subpage);
+
+			ClearPageActive(subpage);
+			ClearPageUnevictable(subpage);
+			list_move(&subpage->lru, &pages_to_free);
+			nr_pages_to_free++;
+			continue;
+		}
+
+		/*
+		 * If a tail page has only one reference left, it will be freed
+		 * by the call to free_page_and_swap_cache below. Since zero
+		 * subpages are no longer remapped, there will only be one
+		 * reference left in cases outside of reclaim or migration.
+		 */
+		if (page_ref_count(subpage) == 1)
+			nr_pages_to_free++;
+
+		/*
 		 * Subpages may be freed if there wasn't any mapping
 		 * like if add_to_swap() is running on a lru page that
 		 * had its mapping zapped. And freeing these pages
@@ -2597,6 +2686,13 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 		 */
 		free_page_and_swap_cache(subpage);
 	}
+
+	if (!nr_pages_to_free)
+		return;
+
+	mem_cgroup_uncharge_list(&pages_to_free);
+	free_unref_page_list(&pages_to_free);
+	count_vm_events(THP_SPLIT_FREE, nr_pages_to_free);
 }
 
 /* Racy check whether the huge page can be split */
@@ -2639,6 +2735,7 @@ int split_huge_page_to_list(struct page *page, struct list_head *list)
 	struct folio *folio = page_folio(page);
 	struct deferred_split *ds_queue = get_deferred_split_queue(&folio->page);
 	XA_STATE(xas, &folio->mapping->i_pages, folio->index);
+	struct list_head *underutilized_thp_list = page_underutilized_thp_list(&folio->page);
 	struct anon_vma *anon_vma = NULL;
 	struct address_space *mapping = NULL;
 	int extra_pins, ret;
@@ -2746,6 +2843,10 @@ int split_huge_page_to_list(struct page *page, struct list_head *list)
 			list_del(page_deferred_list(&folio->page));
 		}
 		spin_unlock(&ds_queue->split_queue_lock);
+		/* Frozen refs lock out additions, test can be lockless */
+		if (!list_empty(underutilized_thp_list))
+			list_lru_del_page(&huge_low_util_page_lru, &folio->page,
+					  underutilized_thp_list);
 		if (mapping) {
 			int nr = folio_nr_pages(folio);
 
@@ -2768,7 +2869,7 @@ fail:
 		if (mapping)
 			xas_unlock(&xas);
 		local_irq_enable();
-		remap_page(folio, folio_nr_pages(folio));
+		remap_page(folio, folio_nr_pages(folio), false);
 		ret = -EBUSY;
 	}
 
@@ -2788,6 +2889,7 @@ out:
 void free_transhuge_page(struct page *page)
 {
 	struct deferred_split *ds_queue = get_deferred_split_queue(page);
+	struct list_head *underutilized_thp_list = page_underutilized_thp_list(page);
 	unsigned long flags;
 
 	spin_lock_irqsave(&ds_queue->split_queue_lock, flags);
@@ -2796,6 +2898,13 @@ void free_transhuge_page(struct page *page)
 		list_del(page_deferred_list(page));
 	}
 	spin_unlock_irqrestore(&ds_queue->split_queue_lock, flags);
+	/* A dead page cannot be re-added to the THP shrinker, test can be lockless */
+	if (!list_empty(underutilized_thp_list))
+		list_lru_del_page(&huge_low_util_page_lru, page, underutilized_thp_list);
+
+	if (PageLRU(page))
+		__folio_clear_lru_flags(page_folio(page));
+
 	free_compound_page(page);
 }
 
@@ -2834,6 +2943,41 @@ void deferred_split_huge_page(struct page *page)
 #endif
 	}
 	spin_unlock_irqrestore(&ds_queue->split_queue_lock, flags);
+}
+
+void add_underutilized_thp(struct page *page)
+{
+	VM_BUG_ON_PAGE(!PageTransHuge(page), page);
+	VM_BUG_ON_PAGE(!PageAnon(page), page);
+
+	/* hugetlbfs pages do not have an associated memcgroup */
+	if (PageHuge(page))
+		return;
+
+	/*
+	 * Need to take a reference on the page to prevent the page from getting free'd from
+	 * under us while we are adding the THP to the shrinker.
+	 */
+	if (!get_page_unless_zero(page))
+		return;
+
+	if (is_huge_zero_page(page))
+		goto out_put;
+
+	/* Stabilize page->memcg to allocate and add to the same list */
+	lock_page(page);
+
+#ifdef CONFIG_MEMCG_KMEM
+	if (memcg_list_lru_alloc(page_memcg(page), &huge_low_util_page_lru, GFP_KERNEL))
+		goto out_unlock;
+#endif
+
+	list_lru_add_page(&huge_low_util_page_lru, page, page_underutilized_thp_list(page));
+
+out_unlock:
+	unlock_page(page);
+out_put:
+	put_page(page);
 }
 
 static unsigned long deferred_split_count(struct shrinker *shrink,
