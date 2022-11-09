@@ -6368,8 +6368,9 @@ static void bfq_completed_request(struct bfq_queue *bfqq, struct bfq_data *bfqd)
 		 * mechanism).
 		 */
 		bfqq->budget_timeout = jiffies;
-
+#ifdef CONFIG_BFQ_GROUP_IOSCHED
 		bfq_del_bfqq_in_groups_with_pending_reqs(bfqq);
+#endif
 		bfq_weights_tree_remove(bfqq);
 	}
 
@@ -7268,7 +7269,9 @@ static int bfq_init_queue(struct request_queue *q, struct elevator_type *e)
 	bfqd->idle_slice_timer.function = bfq_idle_slice_timer;
 
 	bfqd->queue_weights_tree = RB_ROOT_CACHED;
+#ifdef CONFIG_BFQ_GROUP_IOSCHED
 	bfqd->num_groups_with_pending_reqs = 0;
+#endif
 
 	INIT_LIST_HEAD(&bfqd->active_list[0]);
 	INIT_LIST_HEAD(&bfqd->active_list[1]);
