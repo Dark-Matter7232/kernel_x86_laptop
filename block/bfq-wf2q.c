@@ -1628,15 +1628,16 @@ void bfq_requeue_bfqq(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 				    bfqq == bfqd->in_service_queue, expiration);
 }
 
-#ifdef CONFIG_BFQ_GROUP_IOSCHED
 void bfq_add_bfqq_in_groups_with_pending_reqs(struct bfq_queue *bfqq)
 {
 	struct bfq_entity *entity = &bfqq->entity;
 
 	if (!entity->in_groups_with_pending_reqs) {
 		entity->in_groups_with_pending_reqs = true;
+#ifdef CONFIG_BFQ_GROUP_IOSCHED
 		if (!(bfqq_group(bfqq)->num_queues_with_pending_reqs++))
 			bfqq->bfqd->num_groups_with_pending_reqs++;
+#endif
 	}
 }
 
@@ -1646,11 +1647,12 @@ void bfq_del_bfqq_in_groups_with_pending_reqs(struct bfq_queue *bfqq)
 
 	if (entity->in_groups_with_pending_reqs) {
 		entity->in_groups_with_pending_reqs = false;
+#ifdef CONFIG_BFQ_GROUP_IOSCHED
 		if (!(--bfqq_group(bfqq)->num_queues_with_pending_reqs))
 			bfqq->bfqd->num_groups_with_pending_reqs--;
+#endif
 	}
 }
-#endif
 
 /*
  * Called when the bfqq no longer has requests pending, remove it from
@@ -1675,9 +1677,7 @@ void bfq_del_bfqq_busy(struct bfq_queue *bfqq, bool expiration)
 	bfq_deactivate_bfqq(bfqd, bfqq, true, expiration);
 
 	if (!bfqq->dispatched) {
-#ifdef CONFIG_BFQ_GROUP_IOSCHED
 		bfq_del_bfqq_in_groups_with_pending_reqs(bfqq);
-#endif
 		/*
 		 * Next function is invoked last, because it causes bfqq to be
 		 * freed. DO NOT use bfqq after the next function invocation.
@@ -1701,9 +1701,7 @@ void bfq_add_bfqq_busy(struct bfq_queue *bfqq)
 	bfqd->busy_queues[bfqq->ioprio_class - 1]++;
 
 	if (!bfqq->dispatched) {
-#ifdef CONFIG_BFQ_GROUP_IOSCHED
 		bfq_add_bfqq_in_groups_with_pending_reqs(bfqq);
-#endif
 		if (bfqq->wr_coeff == 1)
 			bfq_weights_tree_add(bfqq);
 	}
