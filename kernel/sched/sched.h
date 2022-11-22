@@ -797,10 +797,15 @@ static inline long se_weight(struct sched_entity *se)
 	return scale_load_down(se->load.weight);
 }
 
-
-static inline bool sched_asym_prefer(int a, int b)
+/*
+ * Used to compare specific CPUs. Also when comparing the preferred CPU of a
+ * sched group or building the sched domains; in such cases checking the state
+ * of SMT siblings, if any, is not needed.
+ */
+static inline bool sched_asym_prefer(int a, int b, bool check_smt)
 {
-	return arch_asym_cpu_priority(a) > arch_asym_cpu_priority(b);
+	return arch_asym_cpu_priority(a, check_smt) >
+	       arch_asym_cpu_priority(b, check_smt);
 }
 
 struct perf_domain {
