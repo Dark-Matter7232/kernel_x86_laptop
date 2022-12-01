@@ -6372,6 +6372,16 @@ static int wake_wide(struct task_struct *p)
 }
 
 /*
+ * If a task switches in and then voluntarily relinquishes the
+ * CPU quickly, it is regarded as a short duration task.
+ */
+static inline int is_short_task(struct task_struct *p)
+{
+	return sched_feat(SIS_SHORT) &&
+		(p->se.dur_avg <= sysctl_sched_min_granularity);
+}
+
+/*
  * The purpose of wake_affine() is to quickly determine on which CPU we can run
  * soonest. For the purpose of speed we only consider the waking and previous
  * CPU.
@@ -6406,6 +6416,11 @@ wake_affine_idle(int this_cpu, int prev_cpu, int sync)
 
 	if (available_idle_cpu(prev_cpu))
 		return prev_cpu;
+
+	/* The only running task is a short duration one. */
+	if (cpu_rq(this_cpu)->nr_running == 1 &&
+	    is_short_task((struct task_struct *)cpu_curr(this_cpu)))
+		return this_cpu;
 
 	return nr_cpumask_bits;
 }
@@ -6772,6 +6787,11 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, bool 
 
 		time = cpu_clock(this);
 	}
+
+	if (!has_idle_core && cpu_rq(target)->nr_running == 1 &&
+	    is_short_task((struct task_struct *)cpu_curr(target)) &&
+	    is_short_task(p))
+		return target;
 
 	if (sched_feat(SIS_UTIL)) {
 		sd_share = rcu_dereference(per_cpu(sd_llc_shared, target));
@@ -7880,6 +7900,13 @@ static void put_prev_task_fair(struct rq *rq, struct task_struct *prev)
 {
 	struct sched_entity *se = &prev->se;
 	struct cfs_rq *cfs_rq;
+
+	if (sched_feat(SIS_SHORT) && !prev->on_rq) {
+		u64 this_dur = se->sum_exec_runtime - se->prev_sum_exec_runtime_vol;
+
+		se->prev_sum_exec_runtime_vol = se->sum_exec_runtime;
+		update_avg(&se->dur_avg, this_dur);
+	}
 
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
