@@ -665,6 +665,20 @@ struct mm_struct {
 
 		/* numa_scan_seq prevents two threads remapping PTEs. */
 		int numa_scan_seq;
+
+		/* Process-based Adaptive NUMA */
+		atomic_long_t faults_locality[2];
+		atomic_long_t faults_shared[2];
+		unsigned long faults_locality_history[2];
+		unsigned long faults_shared_history[2];
+
+		spinlock_t pan_numa_lock;
+		unsigned int numa_scan_period;
+		int remote_fault_rates[2]; /* histogram of remote fault rate */
+		long scanned_pages;
+		bool trend;
+		int slope;
+		u8 hist_trend;
 #endif
 		/*
 		 * An operation with batched TLB flushing is going on. Anything
