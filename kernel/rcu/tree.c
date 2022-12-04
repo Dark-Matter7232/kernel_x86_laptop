@@ -670,40 +670,12 @@ void __rcu_irq_enter_check_tick(void)
  * scheduler-clock interrupt.
  *
  * Just check whether or not this CPU has non-offloaded RCU callbacks
- * queued that need immediate attention.
+ * queued.
  */
-int rcu_needs_cpu(u64 basemono, u64 *nextevt)
+int rcu_needs_cpu(void)
 {
-	unsigned long j;
-	unsigned long jlast;
-	unsigned long jwait;
-	struct rcu_data *rdp = this_cpu_ptr(&rcu_data);
-	struct rcu_segcblist *rsclp = &rdp->cblist;
-
-	// Disabled, empty, or offloaded means nothing to do.
-	if (!rcu_segcblist_is_enabled(rsclp) ||
-	    rcu_segcblist_empty(rsclp) || rcu_rdp_is_offloaded(rdp)) {
-		*nextevt = KTIME_MAX;
-		return 0;
-	}
-
-	// Callbacks ready to invoke or that have not already been
-	// assigned a grace period need immediate attention.
-	if (!rcu_segcblist_segempty(rsclp, RCU_DONE_TAIL) ||
-	    !rcu_segcblist_segempty(rsclp, RCU_NEXT_TAIL))
-		return 1;
-
-	// There are callbacks waiting for some later grace period.
-	// Wait for about a grace period or two since the last tick, at which
-	// point there is high probability that this CPU will need to do some
-	// work for RCU.
-	j = jiffies;
-	jlast = __this_cpu_read(rcu_data.last_sched_clock);
-	jwait = READ_ONCE(jiffies_till_first_fqs) + READ_ONCE(jiffies_till_next_fqs) + 1;
-	if (time_after(j, jlast + jwait))
-		return 1;
-	*nextevt = basemono + TICK_NSEC * (jlast + jwait - j);
-	return 0;
+	return !rcu_segcblist_empty(&this_cpu_ptr(&rcu_data)->cblist) &&
+		!rcu_rdp_is_offloaded(this_cpu_ptr(&rcu_data));
 }
 
 /*
@@ -2348,10 +2320,12 @@ void rcu_sched_clock_irq(int user)
 {
 	unsigned long j;
 
+	if (IS_ENABLED(CONFIG_PROVE_RCU)) {
+		j = jiffies;
+		WARN_ON_ONCE(time_before(j, __this_cpu_read(rcu_data.last_sched_clock)));
+		__this_cpu_write(rcu_data.last_sched_clock, j);
+	}
 	trace_rcu_utilization(TPS("Start scheduler-tick"));
-	j = jiffies;
-	WARN_ON_ONCE(time_before(j, __this_cpu_read(rcu_data.last_sched_clock)));
-	__this_cpu_write(rcu_data.last_sched_clock, j);
 	lockdep_assert_irqs_disabled();
 	raw_cpu_inc(rcu_data.ticks_this_gp);
 	/* The load-acquire pairs with the store-release setting to true. */
@@ -2817,7 +2791,7 @@ __call_rcu_common(struct rcu_head *head, rcu_callback_t func, bool lazy)
 
 #ifdef CONFIG_RCU_LAZY
 /**
- * call_rcu_flush() - Queue RCU callback for invocation after grace period, and
+ * call_rcu_hurry() - Queue RCU callback for invocation after grace period, and
  * flush all lazy callbacks (including the new one) to the main ->cblist while
  * doing so.
  *
@@ -2836,18 +2810,18 @@ __call_rcu_common(struct rcu_head *head, rcu_callback_t func, bool lazy)
  * reuses call_rcu()'s logic. Refer to call_rcu() for more details about memory
  * ordering and other functionality.
  */
-void call_rcu_flush(struct rcu_head *head, rcu_callback_t func)
+void call_rcu_hurry(struct rcu_head *head, rcu_callback_t func)
 {
 	return __call_rcu_common(head, func, false);
 }
-EXPORT_SYMBOL_GPL(call_rcu_flush);
+EXPORT_SYMBOL_GPL(call_rcu_hurry);
 #endif
 
 /**
  * call_rcu() - Queue an RCU callback for invocation after a grace period.
  * By default the callbacks are 'lazy' and are kept hidden from the main
  * ->cblist to prevent starting of grace periods too soon.
- * If you desire grace periods to start very soon, use call_rcu_flush().
+ * If you desire grace periods to start very soon, use call_rcu_hurry().
  *
  * @head: structure to be used for queueing the RCU updates.
  * @func: actual callback function to be invoked after the grace period
@@ -3127,8 +3101,8 @@ static void kfree_rcu_work(struct work_struct *work)
 	 * This list is named "Channel 3".
 	 */
 	for (; head; head = next) {
-		void *ptr = (void *) head->func;
-		unsigned long offset = (void *) head - ptr;
+		unsigned long offset = (unsigned long)head->func;
+		void *ptr = (void *)head - offset;
 
 		next = head->next;
 		debug_rcu_head_unqueue((struct rcu_head *)ptr);
@@ -3366,21 +3340,26 @@ add_ptr_to_bulk_krc_lock(struct kfree_rcu_cpu **krcp,
  * be free'd in workqueue context. This allows us to: batch requests together to
  * reduce the number of grace periods during heavy kfree_rcu()/kvfree_rcu() load.
  */
-void kvfree_call_rcu(struct rcu_head *head, void *ptr)
+void kvfree_call_rcu(struct rcu_head *head, rcu_callback_t func)
 {
 	unsigned long flags;
 	struct kfree_rcu_cpu *krcp;
 	bool success;
+	void *ptr;
 
-	/*
-	 * Please note there is a limitation for the head-less
-	 * variant, that is why there is a clear rule for such
-	 * objects: it can be used from might_sleep() context
-	 * only. For other places please embed an rcu_head to
-	 * your data.
-	 */
-	if (!head)
+	if (head) {
+		ptr = (void *) head - (unsigned long) func;
+	} else {
+		/*
+		 * Please note there is a limitation for the head-less
+		 * variant, that is why there is a clear rule for such
+		 * objects: it can be used from might_sleep() context
+		 * only. For other places please embed an rcu_head to
+		 * your data.
+		 */
 		might_sleep();
+		ptr = (unsigned long *) func;
+	}
 
 	// Queue the object but don't yet schedule the batch.
 	if (debug_rcu_head_queue(ptr)) {
@@ -3401,7 +3380,7 @@ void kvfree_call_rcu(struct rcu_head *head, void *ptr)
 			// Inline if kvfree_rcu(one_arg) call.
 			goto unlock_return;
 
-		head->func = ptr;
+		head->func = func;
 		head->next = krcp->head;
 		krcp->head = head;
 		success = true;
@@ -3561,7 +3540,7 @@ void synchronize_rcu(void)
 		if (rcu_gp_is_expedited())
 			synchronize_rcu_expedited();
 		else
-			wait_rcu_gp(call_rcu_flush);
+			wait_rcu_gp(call_rcu_hurry);
 		return;
 	}
 
