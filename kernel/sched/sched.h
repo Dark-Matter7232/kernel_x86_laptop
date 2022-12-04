@@ -2431,6 +2431,8 @@ extern unsigned int sysctl_numa_balancing_scan_period_min;
 extern unsigned int sysctl_numa_balancing_scan_period_max;
 extern unsigned int sysctl_numa_balancing_scan_size;
 extern unsigned int sysctl_numa_balancing_hot_threshold;
+extern unsigned int sysctl_pan_scan_period_min;
+extern unsigned int sysctl_pan_scan_period_max;
 #endif
 
 #ifdef CONFIG_SCHED_HRTICK
