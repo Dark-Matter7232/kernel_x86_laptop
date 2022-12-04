@@ -98,25 +98,25 @@ static inline void synchronize_rcu_expedited(void)
  */
 extern void kvfree(const void *addr);
 
-static inline void __kvfree_call_rcu(struct rcu_head *head, void *ptr)
+static inline void __kvfree_call_rcu(struct rcu_head *head, rcu_callback_t func)
 {
 	if (head) {
-		call_rcu(head, (rcu_callback_t) ((void *) head - ptr));
+		call_rcu(head, func);
 		return;
 	}
 
 	// kvfree_rcu(one_arg) call.
 	might_sleep();
 	synchronize_rcu();
-	kvfree(ptr);
+	kvfree((void *) func);
 }
 
 #ifdef CONFIG_KASAN_GENERIC
-void kvfree_call_rcu(struct rcu_head *head, void *ptr);
+void kvfree_call_rcu(struct rcu_head *head, rcu_callback_t func);
 #else
-static inline void kvfree_call_rcu(struct rcu_head *head, void *ptr)
+static inline void kvfree_call_rcu(struct rcu_head *head, rcu_callback_t func)
 {
-	__kvfree_call_rcu(head, ptr);
+	__kvfree_call_rcu(head, func);
 }
 #endif
 
@@ -133,9 +133,8 @@ static inline void rcu_softirq_qs(void)
 		rcu_tasks_qs(current, (preempt)); \
 	} while (0)
 
-static inline int rcu_needs_cpu(u64 basemono, u64 *nextevt)
+static inline int rcu_needs_cpu(void)
 {
-	*nextevt = KTIME_MAX;
 	return 0;
 }
 
