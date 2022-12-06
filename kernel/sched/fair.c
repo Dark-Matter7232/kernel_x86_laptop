@@ -160,11 +160,8 @@ __setup("sched_thermal_decay_shift=", setup_sched_thermal_decay_shift);
 #ifdef CONFIG_SMP
 /*
  * For asym packing, by default the lower numbered CPU has higher priority.
- *
- * When doing ASYM_PACKING at the "MC" or higher domains, architectures may
- * want to check the idle state of the SMT siblngs of @cpu.
  */
-int __weak arch_asym_cpu_priority(int cpu, bool check_smt)
+int __weak arch_asym_cpu_priority(int cpu)
 {
 	return -cpu;
 }
@@ -1074,28 +1071,6 @@ update_stats_curr_start(struct cfs_rq *cfs_rq, struct sched_entity *se)
  * Scheduling class queueing methods:
  */
 
-static inline bool is_core_idle(int cpu)
-{
-#ifdef CONFIG_SCHED_SMT
-	int sibling;
-
-	for_each_cpu(sibling, cpu_smt_mask(cpu)) {
-		if (cpu == sibling)
-			continue;
-
-		if (!idle_cpu(sibling))
-			return false;
-	}
-#endif
-
-	return true;
-}
-
-bool sched_smt_siblings_idle(int cpu)
-{
-	return is_core_idle(cpu);
-}
-
 #ifdef CONFIG_NUMA
 #define NUMA_IMBALANCE_MIN 2
 
@@ -1738,6 +1713,23 @@ struct numa_stats {
 	enum numa_type node_type;
 	int idle_cpu;
 };
+
+static inline bool is_core_idle(int cpu)
+{
+#ifdef CONFIG_SCHED_SMT
+	int sibling;
+
+	for_each_cpu(sibling, cpu_smt_mask(cpu)) {
+		if (cpu == sibling)
+			continue;
+
+		if (!idle_cpu(sibling))
+			return false;
+	}
+#endif
+
+	return true;
+}
 
 struct task_numa_env {
 	struct task_struct *p;
@@ -9494,10 +9486,12 @@ static bool asym_smt_can_pull_tasks(int dst_cpu, struct sd_lb_stats *sds,
 				    struct sched_group *sg)
 {
 #ifdef CONFIG_SCHED_SMT
-	bool local_is_smt;
+	bool local_is_smt, sg_is_smt;
 	int sg_busy_cpus;
 
 	local_is_smt = sds->local->flags & SD_SHARE_CPUCAPACITY;
+	sg_is_smt = sg->flags & SD_SHARE_CPUCAPACITY;
+
 	sg_busy_cpus = sgs->group_weight - sgs->idle_cpus;
 
 	if (!local_is_smt) {
@@ -9515,20 +9509,29 @@ static bool asym_smt_can_pull_tasks(int dst_cpu, struct sd_lb_stats *sds,
 		 * can help if it has higher priority and is idle (i.e.,
 		 * it has no running tasks).
 		 */
-		return sched_asym_prefer(dst_cpu, sg->asym_prefer_cpu, false);
+		return sched_asym_prefer(dst_cpu, sg->asym_prefer_cpu);
+	}
+
+	/* @dst_cpu has SMT siblings. */
+
+	if (sg_is_smt) {
+		int local_busy_cpus = sds->local->group_weight -
+				      sds->local_stat.idle_cpus;
+		int busy_cpus_delta = sg_busy_cpus - local_busy_cpus;
+
+		if (busy_cpus_delta == 1)
+			return sched_asym_prefer(dst_cpu, sg->asym_prefer_cpu);
+
+		return false;
 	}
 
 	/*
-	 * @dst_cpu has SMT siblings. Do asym_packing load balancing only if
-	 * all its siblings are idle (moving tasks between physical cores in
-	 * which some SMT siblings are busy results in the same throughput).
-	 *
-	 * If the difference in the number of busy CPUs is two or more, let
-	 * find_busiest_group() take care of it. We only care if @sg has
-	 * exactly one busy CPU. This covers SMT and non-SMT sched groups.
+	 * @sg does not have SMT siblings. Ensure that @sds::local does not end
+	 * up with more than one busy SMT sibling and only pull tasks if there
+	 * are not busy CPUs (i.e., no CPU has running tasks).
 	 */
-	if (sg_busy_cpus == 1 && !sds->local_stat.sum_nr_running)
-		return sched_asym_prefer(dst_cpu, sg->asym_prefer_cpu, false);
+	if (!sds->local_stat.sum_nr_running)
+		return sched_asym_prefer(dst_cpu, sg->asym_prefer_cpu);
 
 	return false;
 #else
@@ -9546,8 +9549,7 @@ sched_asym(struct lb_env *env, struct sd_lb_stats *sds,  struct sg_lb_stats *sgs
 	    (group->flags & SD_SHARE_CPUCAPACITY))
 		return asym_smt_can_pull_tasks(env->dst_cpu, sds, sgs, group);
 
-	/* Neither env::dst_cpu nor group::asym_prefer_cpu have SMT siblings. */
-	return sched_asym_prefer(env->dst_cpu, group->asym_prefer_cpu, false);
+	return sched_asym_prefer(env->dst_cpu, group->asym_prefer_cpu);
 }
 
 static inline bool
@@ -9713,9 +9715,7 @@ static bool update_sd_pick_busiest(struct lb_env *env,
 
 	case group_asym_packing:
 		/* Prefer to move from lowest priority CPU's work */
-		if (sched_asym_prefer(sg->asym_prefer_cpu,
-				      sds->busiest->asym_prefer_cpu,
-				      false))
+		if (sched_asym_prefer(sg->asym_prefer_cpu, sds->busiest->asym_prefer_cpu))
 			return false;
 		break;
 
@@ -10663,7 +10663,7 @@ static struct rq *find_busiest_queue(struct lb_env *env,
 
 		/* Make sure we only pull tasks from a CPU of lower priority */
 		if ((env->sd->flags & SD_ASYM_PACKING) &&
-		    sched_asym_prefer(i, env->dst_cpu, true) &&
+		    sched_asym_prefer(i, env->dst_cpu) &&
 		    nr_running == 1)
 			continue;
 
@@ -10756,7 +10756,7 @@ asym_active_balance(struct lb_env *env)
 	 * highest priority CPUs.
 	 */
 	return env->idle != CPU_NOT_IDLE && (env->sd->flags & SD_ASYM_PACKING) &&
-	       sched_asym_prefer(env->dst_cpu, env->src_cpu, true);
+	       sched_asym_prefer(env->dst_cpu, env->src_cpu);
 }
 
 static inline bool
@@ -11492,7 +11492,7 @@ static void nohz_balancer_kick(struct rq *rq)
 		 * around.
 		 */
 		for_each_cpu_and(i, sched_domain_span(sd), nohz.idle_cpus_mask) {
-			if (sched_asym_prefer(i, cpu, true)) {
+			if (sched_asym_prefer(i, cpu)) {
 				flags = NOHZ_STATS_KICK | NOHZ_BALANCE_KICK;
 				goto unlock;
 			}
