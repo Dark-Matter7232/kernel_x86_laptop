@@ -708,51 +708,10 @@ void bfq_bfqq_move(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 		bfq_activate_bfqq(bfqd, bfqq);
 	}
 
-	if (!bfqd->in_service_queue && !bfqd->tot_rq_in_driver)
+	if (!bfqd->in_service_queue && !bfqd->rq_in_driver)
 		bfq_schedule_dispatch(bfqd);
 	/* release extra ref taken above, bfqq may happen to be freed now */
 	bfq_put_queue(bfqq);
-}
-
-static void bfq_sync_bfqq_move(struct bfq_data *bfqd,
-			       struct bfq_queue *sync_bfqq,
-			       struct bfq_io_cq *bic,
-			       struct bfq_group *bfqg,
-			       unsigned int act_idx)
-{
-	struct bfq_queue *bfqq;
-
-	if (!sync_bfqq->new_bfqq && !bfq_bfqq_coop(sync_bfqq)) {
-		/* We are the only user of this bfqq, just move it */
-		if (sync_bfqq->entity.sched_data != &bfqg->sched_data)
-			bfq_bfqq_move(bfqd, sync_bfqq, bfqg);
-		return;
-	}
-
-	/*
-	 * The queue was merged to a different queue. Check
-	 * that the merge chain still belongs to the same
-	 * cgroup.
-	 */
-	for (bfqq = sync_bfqq; bfqq; bfqq = bfqq->new_bfqq)
-		if (bfqq->entity.sched_data !=
-		    &bfqg->sched_data)
-			break;
-	if (bfqq) {
-		/*
-		 * Some queue changed cgroup so the merge is not valid
-		 * anymore. We cannot easily just cancel the merge (by
-		 * clearing new_bfqq) as there may be other processes
-		 * using this queue and holding refs to all queues
-		 * below sync_bfqq->new_bfqq. Similarly if the merge
-		 * already happened, we need to detach from bfqq now
-		 * so that we cannot merge bio to a request from the
-		 * old cgroup.
-		 */
-		bfq_put_cooperator(sync_bfqq);
-		bfq_release_process_ref(bfqd, sync_bfqq);
-		bic_set_bfqq(bic, NULL, true, act_idx);
-	}
 }
 
 /**
@@ -769,20 +728,53 @@ static void *__bfq_bic_change_cgroup(struct bfq_data *bfqd,
 				     struct bfq_io_cq *bic,
 				     struct bfq_group *bfqg)
 {
-	unsigned int act_idx;
+	struct bfq_queue *async_bfqq = bic_to_bfqq(bic, 0);
+	struct bfq_queue *sync_bfqq = bic_to_bfqq(bic, 1);
+	struct bfq_entity *entity;
 
-	for (act_idx = 0; act_idx < bfqd->num_actuators; act_idx++) {
-		struct bfq_queue *async_bfqq = bic_to_bfqq(bic, false, act_idx);
-		struct bfq_queue *sync_bfqq = bic_to_bfqq(bic, true, act_idx);
+	if (async_bfqq) {
+		entity = &async_bfqq->entity;
 
-		if (async_bfqq &&
-		    async_bfqq->entity.sched_data != &bfqg->sched_data) {
-			bic_set_bfqq(bic, NULL, false, act_idx);
+		if (entity->sched_data != &bfqg->sched_data) {
+			bic_set_bfqq(bic, NULL, 0);
 			bfq_release_process_ref(bfqd, async_bfqq);
 		}
+	}
 
-		if (sync_bfqq)
-			bfq_sync_bfqq_move(bfqd, sync_bfqq, bic, bfqg, act_idx);
+	if (sync_bfqq) {
+		if (!sync_bfqq->new_bfqq && !bfq_bfqq_coop(sync_bfqq)) {
+			/* We are the only user of this bfqq, just move it */
+			if (sync_bfqq->entity.sched_data != &bfqg->sched_data)
+				bfq_bfqq_move(bfqd, sync_bfqq, bfqg);
+		} else {
+			struct bfq_queue *bfqq;
+
+			/*
+			 * The queue was merged to a different queue. Check
+			 * that the merge chain still belongs to the same
+			 * cgroup.
+			 */
+			for (bfqq = sync_bfqq; bfqq; bfqq = bfqq->new_bfqq)
+				if (bfqq->entity.sched_data !=
+				    &bfqg->sched_data)
+					break;
+			if (bfqq) {
+				/*
+				 * Some queue changed cgroup so the merge is
+				 * not valid anymore. We cannot easily just
+				 * cancel the merge (by clearing new_bfqq) as
+				 * there may be other processes using this
+				 * queue and holding refs to all queues below
+				 * sync_bfqq->new_bfqq. Similarly if the merge
+				 * already happened, we need to detach from
+				 * bfqq now so that we cannot merge bio to a
+				 * request from the old cgroup.
+				 */
+				bfq_put_cooperator(sync_bfqq);
+				bfq_release_process_ref(bfqd, sync_bfqq);
+				bic_set_bfqq(bic, NULL, 1);
+			}
+		}
 	}
 
 	return bfqg;
