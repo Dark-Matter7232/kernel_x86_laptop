@@ -81,22 +81,42 @@ struct drm_printer {
 	const char *prefix;
 };
 
-void __drm_printfn_coredump(struct drm_printer *p, struct va_format *vaf);
-void __drm_puts_coredump(struct drm_printer *p, const char *str);
-void __drm_printfn_seq_file(struct drm_printer *p, struct va_format *vaf);
-void __drm_puts_seq_file(struct drm_printer *p, const char *str);
-void __drm_printfn_info(struct drm_printer *p, struct va_format *vaf);
-void __drm_printfn_debug(struct drm_printer *p, struct va_format *vaf);
-void __drm_printfn_err(struct drm_printer *p, struct va_format *vaf);
+static inline void __drm_printfn_coredump(struct drm_printer *p, struct va_format *vaf)
+{
+}
+static inline void __drm_puts_coredump(struct drm_printer *p, const char *str)
+{
+}
+static inline void __drm_printfn_seq_file(struct drm_printer *p, struct va_format *vaf)
+{
+}
+static inline void __drm_puts_seq_file(struct drm_printer *p, const char *str)
+{
+}
+static inline void __drm_printfn_info(struct drm_printer *p, struct va_format *vaf)
+{
+}
+static inline void __drm_printfn_debug(struct drm_printer *p, struct va_format *vaf)
+{
+}
+static inline void __drm_printfn_err(struct drm_printer *p, struct va_format *vaf)
+{
+}
 
-__printf(2, 3)
-void drm_printf(struct drm_printer *p, const char *f, ...);
-void drm_puts(struct drm_printer *p, const char *str);
-void drm_print_regset32(struct drm_printer *p, struct debugfs_regset32 *regset);
-void drm_print_bits(struct drm_printer *p, unsigned long value,
-		    const char * const bits[], unsigned int nbits);
+static inline void drm_printf(struct drm_printer *p, const char *f, ...)
+{
+}
+static inline void drm_puts(struct drm_printer *p, const char *str)
+{
+}
+static inline void drm_print_regset32(struct drm_printer *p, struct debugfs_regset32 *regset)
+{
+}
+static inline void drm_print_bits(struct drm_printer *p, unsigned long value,
+		    const char * const bits[], unsigned int nbits)
+{
+}
 
-__printf(2, 0)
 /**
  * drm_vprintf - print to a &drm_printer stream
  * @p: the &drm_printer
@@ -106,9 +126,6 @@ __printf(2, 0)
 static inline void
 drm_vprintf(struct drm_printer *p, const char *fmt, va_list *va)
 {
-	struct va_format vaf = { .fmt = fmt, .va = va };
-
-	p->printfn(p, &vaf);
 }
 
 /**
@@ -323,7 +340,7 @@ enum drm_debug_category {
 
 static inline bool drm_debug_enabled_raw(enum drm_debug_category category)
 {
-	return unlikely(__drm_debug & BIT(category));
+	return false;
 }
 
 #define drm_debug_enabled_instrumented(category)			\
@@ -351,13 +368,14 @@ static inline bool drm_debug_enabled_raw(enum drm_debug_category category)
  * Prefer drm_device based logging over device or printk based logging.
  */
 
-__printf(3, 4)
-void drm_dev_printk(const struct device *dev, const char *level,
-		    const char *format, ...);
-struct _ddebug;
-__printf(4, 5)
-void __drm_dev_dbg(struct _ddebug *desc, const struct device *dev,
-		   enum drm_debug_category category, const char *format, ...);
+static inline void drm_dev_printk(const struct device *dev, const char *level,
+		    const char *format, ...)
+{
+}
+static inline void __drm_dev_dbg(struct _ddebug *desc, const struct device *dev,
+		   enum drm_debug_category category, const char *format, ...)
+{
+}
 
 /**
  * DRM_DEV_ERROR() - Error output.
@@ -515,10 +533,12 @@ void __drm_dev_dbg(struct _ddebug *desc, const struct device *dev,
  * Prefer drm_device based logging over device or prink based logging.
  */
 
-__printf(3, 4)
-void ___drm_dbg(struct _ddebug *desc, enum drm_debug_category category, const char *format, ...);
-__printf(1, 2)
-void __drm_err(const char *format, ...);
+static inline void ___drm_dbg(struct _ddebug *desc, enum drm_debug_category category, const char *format, ...)
+{
+}
+static inline void __drm_err(const char *format, ...)
+{
+}
 
 #if !defined(CONFIG_DRM_USE_DYNAMIC_DEBUG)
 #define __drm_dbg(fmt, ...)		___drm_dbg(NULL, fmt, ##__VA_ARGS__)
