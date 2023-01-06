@@ -82,12 +82,6 @@ bool redirty_page_for_writepage(struct writeback_control *wbc,
 }
 EXPORT_SYMBOL(redirty_page_for_writepage);
 
-void lru_cache_add(struct page *page)
-{
-	folio_add_lru(page_folio(page));
-}
-EXPORT_SYMBOL(lru_cache_add);
-
 void lru_cache_add_inactive_or_unevictable(struct page *page,
 		struct vm_area_struct *vma)
 {
@@ -108,7 +102,7 @@ struct page *pagecache_get_page(struct address_space *mapping, pgoff_t index,
 	struct folio *folio;
 
 	folio = __filemap_get_folio(mapping, index, fgp_flags, gfp);
-	if ((fgp_flags & FGP_HEAD) || !folio || xa_is_value(folio))
+	if (!folio || xa_is_value(folio))
 		return &folio->page;
 	return folio_file_page(folio, index);
 }
@@ -128,12 +122,6 @@ void delete_from_page_cache(struct page *page)
 {
 	return filemap_remove_folio(page_folio(page));
 }
-
-int try_to_release_page(struct page *page, gfp_t gfp)
-{
-	return filemap_release_folio(page_folio(page), gfp);
-}
-EXPORT_SYMBOL(try_to_release_page);
 
 int isolate_lru_page(struct page *page)
 {
